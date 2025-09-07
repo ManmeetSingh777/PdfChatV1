@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "name": "pdf-chat-app",
+  "builds": [
+    {
+      "src": "apps/web/package.json",
+      "use": "@vercel/next",
+      "config": {
+        "rootDirectory": "apps/web"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "apps/web/$1"
+    }
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  },
+  "functions": {
+    "apps/web/src/app/api/**": {
+      "maxDuration": 300
+    }
+  }
+}
