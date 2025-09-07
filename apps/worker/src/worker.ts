@@ -6,6 +6,7 @@ import pdfParse from 'pdf-parse'
 import { OpenAI } from 'openai'
 import { GoogleGenerativeAI } from '@google/generative-ai'
 import { Pinecone } from '@pinecone-database/pinecone'
+import { updateDocumentStatus, testConnection } from './db'
 
 // Load environment variables from .env file
 config({ path: '.env' })
@@ -18,7 +19,7 @@ console.log('- GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? '✅ Set (PRIMARY)
 console.log('- S3_ACCESS_KEY:', process.env.S3_ACCESS_KEY ? '✅ Set' : '❌ Missing')
 
 const app = express()
-const port = process.env.WORKER_PORT || 3003
+const port = process.env.PORT || process.env.WORKER_PORT || 3003
 
 app.use(express.json())
 
@@ -289,7 +290,7 @@ async function processPDFUltraFast(s3Key: string, documentId: string) {
     console.log(`📊 Download: ${downloadTime}ms | Parse: ${parseTime}ms | Chunk: ${chunkTime}ms | Embeddings: ${embeddingTime}ms`)
     
     // Update final status
-    await updateDocumentStatus(documentId, 'ready', pageCount)
+    await updateDocumentWithPageCount(documentId, 'completed', pageCount)
     updateJobProgress(documentId, `Ready! Processed in ${(totalTime/1000).toFixed(1)}s`)
     
     return { 
@@ -302,7 +303,7 @@ async function processPDFUltraFast(s3Key: string, documentId: string) {
     
   } catch (error) {
     console.error(`❌ ULTRA-FAST processing failed:`, error)
-    await updateDocumentStatus(documentId, 'failed', 0)
+    await updateDocumentWithPageCount(documentId, 'failed', 0, error.message)
     updateJobProgress(documentId, `Failed: ${error.message}`)
     throw error
   }
@@ -317,20 +318,24 @@ function updateJobProgress(documentId: string, progress: string) {
   }
 }
 
-// Update document status
-async function updateDocumentStatus(documentId: string, status: 'ready' | 'failed', pageCount: number) {
+// Update document with page count
+async function updateDocumentWithPageCount(documentId: string, status: 'completed' | 'failed', pageCount: number, error?: string) {
   try {
-    const response = await fetch('http://localhost:3000/api/documents/status', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ documentId, status, pageCount })
-    })
+    await updateDocumentStatus(documentId, status, error)
     
-    if (!response.ok) {
-      console.error(`Failed to update document status: ${response.status}`)
+    // Also update page count if successful
+    if (status === 'completed' && pageCount > 0) {
+      const { query } = await import('./db')
+      const updateQuery = `
+        UPDATE documents 
+        SET page_count = $1, updated_at = NOW()
+        WHERE id = $2
+      `
+      await query(updateQuery, [pageCount, documentId])
+      console.log(`📄 Updated document ${documentId} page count: ${pageCount}`)
     }
   } catch (error) {
-    console.error(`Failed to update document status:`, error)
+    console.error('❌ Error updating document:', error)
   }
 }
 
@@ -452,10 +457,13 @@ app.post('/jobs', (req: express.Request, res: express.Response) => {
   res.json({ success: true, jobId: job.id })
 })
 
-app.listen(port, () => {
+app.listen(port, async () => {
   console.log(`⚡ ULTRA-FAST Worker service running on port ${port}`)
   console.log(`🚀 Optimized for speed: Parallel embeddings + Smart chunking`)
   console.log(`📊 Health check: http://localhost:${port}/health`)
+  
+  // Test database connection
+  await testConnection()
 })
 
 console.log('🚀 PDF Chat Worker EXTREME SPEED MODE activated!')
