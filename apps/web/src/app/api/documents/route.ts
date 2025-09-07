@@ -118,28 +118,25 @@ export async function POST(request: NextRequest) {
       updatedAt: row.updated_at
     }
 
-    // Process document with serverless worker
+    // Queue ingestion job with the worker
     try {
-      const workerResponse = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/worker/process`, {
+      const workerUrl = process.env.WORKER_URL || 'http://localhost:3003'
+      const workerResponse = await fetch(`${workerUrl}/process`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          documentId: fileId,
-          s3Key
+          s3Key,
+          documentId: fileId
         })
       })
 
       if (!workerResponse.ok) {
-        console.error('Failed to process document with serverless worker')
-        // Update document status to failed
-        await updateDocument(fileId, { status: 'failed' })
+        console.error('Failed to queue job with worker')
       } else {
-        console.log(`✅ Started processing job for: ${title}`)
+        console.log(`✅ Queued processing job for: ${title}`)
       }
     } catch (error) {
-      console.error('Failed to process document:', error)
-      // Update document status to failed
-      await updateDocument(fileId, { status: 'failed' })
+      console.error('Failed to communicate with worker:', error)
     }
 
     console.log(`📄 Document created in database: ${title} (${fileId})`)
